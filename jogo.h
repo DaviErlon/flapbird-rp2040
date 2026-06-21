@@ -19,6 +19,7 @@
 #define PIPE_VELOCITY -1
 
 #define GAP_SIZE 26
+#define GAP_RANDOM 58 - GAP_SIZE
 #define PIPE_DISTANCE 37
 #define BIRD_WIDTH 7
 #define PIPE_WIDTH 5
@@ -41,13 +42,19 @@ typedef enum {
     GAME_STATE_PAUSE    
 } State;
 
-void play_init_sound();
-void play_game_start_sound();
-void play_game_over_sound();
-void init_config();
+static inline void play_init_sound();
+static inline void play_game_start_sound();
+static inline void play_game_over_sound();
+static inline void init_config();
 void render_task();
-void game_start();
-void game_over();
-void draw_objects(ssd1306_t *ssd);
+static inline void game_start();
+static inline void game_over();
+static inline void draw_objects(ssd1306_t *ssd);
+static inline void draw_pipes(ssd1306_t *ssd, Pipe pps[5], bool value);
+static inline void draw_bird(ssd1306_t *ssd, int8_t p, bool value);
+static inline void game_over_screen(ssd1306_t *ssd);
+static inline void paused_screen(ssd1306_t *ssd);
+static inline void menu_screen(ssd1306_t *ssd);
+static inline void clear_screen(ssd1306_t *ssd);
 
 #endif

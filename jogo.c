@@ -7,7 +7,6 @@
 #include "inc/font.h"
 
 #include <inttypes.h>
-#include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
@@ -73,7 +72,7 @@ int main()
                 // se desaparece da tela é 'respawnado' ao final
                 if (pipes[i].pos_x <= -5) {
                     pipes[i].pos_x = 175;
-                    pipes[i].gap_y = (rand() % (58 - GAP_SIZE)) + 3;
+                    pipes[i].gap_y = (rand() % (GAP_RANDOM)) + 3;
                     pipes[i].passed = false;
                     continue;
                 }
@@ -128,88 +127,63 @@ int main()
     return 0;
 }
 
+
 // programa do core1
 void render_task()
 {
     // inicialização do display em paralelo com as inicializações do core0
     i2c_init(I2C_PORT, 400 * 1000);
-
+    
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
     gpio_set_function(I2C_SCL, GPIO_FUNC_I2C);
-
+    
     gpio_pull_up(I2C_SDA);
     gpio_pull_up(I2C_SCL);
-
+    
     // objeto display ssd1306 128x64
     ssd1306_t ssd;
-
+    
     ssd1306_init(&ssd, WIDTH, HEIGHT, false, END, I2C_PORT);
     ssd1306_config(&ssd);
-
+    
     // limpar display
     ssd1306_fill(&ssd, false);
     ssd1306_send_data(&ssd);
-
+    
     while(true) {
         switch (state) {
         case GAME_STATE_PLAYING:
-                draw_objects(&ssd);
-                break;
-
+            // renderiza todos os objetos
+            draw_objects(&ssd);
+            break;
         case GAME_STATE_MENU:
-            ssd1306_hline(&ssd, 22, 101, 19, true);
-            ssd1306_hline(&ssd, 22, 101, 41, true);
-            ssd1306_vline(&ssd, 22, 19, 41, true);
-            ssd1306_vline(&ssd, 101, 19, 41, true);
-            ssd1306_draw_string(&ssd, "FLAPBIRD", 31, 23);
-            ssd1306_draw_string(&ssd, "press btn", 27, 31);
-            ssd1306_send_data(&ssd);
+            menu_screen(&ssd);
+
             // dedicar o programa a esperar resposta do core0
             while (state == GAME_STATE_MENU)
                 sleep_ms(20);
+            
             // limpar tela
-            ssd1306_fill(&ssd, false);
-            ssd1306_send_data(&ssd);
-            break;
-
+            clear_screen(&ssd);
+            break;    
         case GAME_STATE_GAME_OVER:
-            ssd1306_hline(&ssd, 22, 101, 19, true);
-            ssd1306_hline(&ssd, 22, 101, 41, true);
-            ssd1306_vline(&ssd, 22, 19, 41, true);
-            ssd1306_vline(&ssd, 101, 19, 41, true);
-            ssd1306_draw_string(&ssd, "YOU LOST", 31, 23);
-            ssd1306_draw_string(&ssd, "try again", 27, 31);
-            ssd1306_send_data(&ssd);
-
+            game_over_screen(&ssd);
             while (state == GAME_STATE_GAME_OVER)
                 sleep_ms(20);
-
-            // limpar tela
-            ssd1306_fill(&ssd, false);
-            ssd1306_send_data(&ssd);
+            clear_screen(&ssd);
             break;
-        
+            
         case GAME_STATE_PAUSE:
-            ssd1306_hline(&ssd, 22, 101, 19, true);
-            ssd1306_hline(&ssd, 22, 101, 41, true);
-            ssd1306_vline(&ssd, 22, 19, 41, true);
-            ssd1306_vline(&ssd, 101, 19, 41, true);
-            ssd1306_draw_string(&ssd, "PAUSED", 39, 23);
-            ssd1306_draw_string(&ssd, "press btn", 27, 31);
-            ssd1306_send_data(&ssd);
-
+            paused_screen(&ssd);
             while (state == GAME_STATE_PAUSE)
                 sleep_ms(20);
-
-            // limpar tela
-            ssd1306_fill(&ssd, false);
-            ssd1306_send_data(&ssd);
-            break;
+            clear_screen(&ssd);
+        break;
         }
     }
 }
 
-void init_config()
+static inline void init_config()
 {
     // ativa o core1 para inicializar o display já em paralelo
     multicore_launch_core1(render_task);
@@ -218,32 +192,64 @@ void init_config()
     * a função rand será utilizada para a criação
     * pseudo aleatoria das passagens pelos canos
     */
-    srand(time_us_32());
-
-    // botao
-    gpio_init(BOTAO_A);
-    gpio_set_dir(BOTAO_A, GPIO_IN);
-    gpio_pull_up(BOTAO_A);
-    
-    gpio_init(BOTAO_B);
-    gpio_set_dir(BOTAO_B, GPIO_IN);
-    gpio_pull_up(BOTAO_B);
-
-    // PWM dos buzzers
-    gpio_set_function(BUZZER_A, GPIO_FUNC_PWM);
-    gpio_set_function(BUZZER_B, GPIO_FUNC_PWM);
-
-    uint slice_a = pwm_gpio_to_slice_num(BUZZER_A);
-    uint slice_b = pwm_gpio_to_slice_num(BUZZER_B);
+   srand(time_us_32());
+   
+   // botao
+   gpio_init(BOTAO_A);
+   gpio_set_dir(BOTAO_A, GPIO_IN);
+   gpio_pull_up(BOTAO_A);
+   
+   gpio_init(BOTAO_B);
+   gpio_set_dir(BOTAO_B, GPIO_IN);
+   gpio_pull_up(BOTAO_B);
+   
+   // PWM dos buzzers
+   gpio_set_function(BUZZER_A, GPIO_FUNC_PWM);
+   gpio_set_function(BUZZER_B, GPIO_FUNC_PWM);
+   
+   uint slice_a = pwm_gpio_to_slice_num(BUZZER_A);
+   uint slice_b = pwm_gpio_to_slice_num(BUZZER_B);
 
     pwm_set_clkdiv(slice_a, 4.0f);
     pwm_set_clkdiv(slice_b, 4.0f);
-
+    
     pwm_set_enabled(slice_a, true);
     pwm_set_enabled(slice_b, true);
-
+    
     // tocar som de inicialização
     play_init_sound();
+}
+
+static inline void draw_objects(ssd1306_t *ssd)
+{
+    // placar
+    char pts[4];
+    snprintf(pts, sizeof(pts), "%03u", points);
+    
+    /*
+    * fazer uma cópia é importante para manter a consistencia
+    * entre os frames, pois enquanto o core1 desenha o core0
+    * pode alterar o valor desses objetos
+    */ 
+   Pipe pps[5];
+   for (uint8_t i = 0; i < 5; i++){
+       pps[i].pos_x = pipes[i].pos_x;
+       pps[i].gap_y = pipes[i].gap_y;
+    }
+    int8_t p = (int)(bird.pos_y);
+    
+    //desenhar canos, placar e o passaro
+    draw_pipes(ssd, pps, true);
+    ssd1306_draw_string(ssd, pts, 99, 3);
+    draw_bird(ssd, p, true);
+    
+    // enviar os dados desenhados no buffer para o display
+    ssd1306_send_data(ssd);
+    
+    // apagar tudo o que foi desenhado do buffer para o proximo frame
+    ssd1306_rect(ssd, 2, 98, 26, 10, false, true);
+    draw_bird(ssd, p, false);
+    draw_pipes(ssd, pps, false);
 }
 
 // função generica para emitir uma frequencia aos buzzers
@@ -256,10 +262,10 @@ void play_buzzer(uint freq_a, uint freq_b, uint tempo_ms)
 
     uint slice_a = pwm_gpio_to_slice_num(BUZZER_A);
     uint slice_b = pwm_gpio_to_slice_num(BUZZER_B);
-
+    
     uint ch_a = pwm_gpio_to_channel(BUZZER_A);
     uint ch_b = pwm_gpio_to_channel(BUZZER_B);
-
+    
     // frequencia pwm
     uint32_t wrap_a = 125000000 / (4 * freq_a) - 1;
     uint32_t wrap_b = 125000000 / (4 * freq_b) - 1;
@@ -267,7 +273,7 @@ void play_buzzer(uint freq_a, uint freq_b, uint tempo_ms)
     // level / wrap = duty cycle
     pwm_set_wrap(slice_a, wrap_a);
     pwm_set_wrap(slice_b, wrap_b);
-
+    
     pwm_set_chan_level(slice_a, ch_a, wrap_a / 2); // 50% duty cycle
     pwm_set_chan_level(slice_b, ch_b, wrap_b / 2);
 
@@ -280,67 +286,53 @@ void play_buzzer(uint freq_a, uint freq_b, uint tempo_ms)
     sleep_ms(30);
 }
 
-void play_init_sound()
-{
-    play_buzzer(900, 1200, 160);
-    play_buzzer(950, 1200, 120);
-    play_buzzer(1000, 1200, 80);
+//funcoes de auxilio para desenho
+static inline void menu_screen(ssd1306_t *ssd){
+    ssd1306_hline(ssd, 22, 101, 19, true);
+    ssd1306_hline(ssd, 22, 101, 41, true);
+    ssd1306_vline(ssd, 22, 19, 41, true);
+    ssd1306_vline(ssd, 101, 19, 41, true);
+    ssd1306_draw_string(ssd, "FLAPBIRD", 31, 23);
+    ssd1306_draw_string(ssd, "press btn", 27, 31);
+    ssd1306_send_data(ssd);
 }
 
-void play_game_start_sound()
-{
-    play_buzzer(523, 659, 80);
-    play_buzzer(659, 784, 80);
-    play_buzzer(784, 1046, 150);
-    play_buzzer(865, 1046, 200);
+static inline void paused_screen(ssd1306_t *ssd){
+    ssd1306_hline(ssd, 22, 101, 19, true);
+    ssd1306_hline(ssd, 22, 101, 41, true);
+    ssd1306_vline(ssd, 22, 19, 41, true);
+    ssd1306_vline(ssd, 101, 19, 41, true);
+    ssd1306_draw_string(ssd, "PAUSED", 39, 23);
+    ssd1306_draw_string(ssd, "press btn", 27, 31);
+    ssd1306_send_data(ssd);
 }
 
-void play_game_over_sound()
-{
-    play_buzzer(800, 600, 140);
-    play_buzzer(700, 500, 110);
-    play_buzzer(600, 500, 110);
-    play_buzzer(500, 500, 180);
+static inline void game_over_screen(ssd1306_t *ssd){
+    ssd1306_hline(ssd, 22, 101, 19, true);
+    ssd1306_hline(ssd, 22, 101, 41, true);
+    ssd1306_vline(ssd, 22, 19, 41, true);
+    ssd1306_vline(ssd, 101, 19, 41, true);
+    ssd1306_draw_string(ssd, "YOU LOST", 31, 23);
+    ssd1306_draw_string(ssd, "try again", 27, 31);
+    ssd1306_send_data(ssd);
 }
 
-// inicialização padrao dos objetos do jogo
-void game_start()
-{
-    for (uint8_t i = 0; i < 5; i++) {
-        pipes[i] = (Pipe){
-            (int16_t)(127 + i * PIPE_DISTANCE), // começam fora da tela 
-            (uint8_t)((rand() % (58 - GAP_SIZE)) + 3), // gap pseudo aleatorio
-            false
-        };
-    }
-    bird = (Bird){32.0f, 0.0f};
-    state = GAME_STATE_PLAYING;
-    points = 0;
-    play_game_start_sound();
+static inline void clear_screen(ssd1306_t *ssd){
+    ssd1306_fill(ssd, false);
+    ssd1306_send_data(ssd);
 }
 
-void game_over()
-{
-    state = GAME_STATE_GAME_OVER;
-    play_game_over_sound();
+static inline void draw_bird(ssd1306_t *ssd, int8_t p, bool value){
+    ssd1306_vline(ssd, 12, p + 2, p + 5, value);
+    ssd1306_vline(ssd, 13, p + 1, p + 6, value);
+    ssd1306_vline(ssd, 14, p, p + 7, value);
+    ssd1306_vline(ssd, 15, p, p + 7, value);
+    ssd1306_vline(ssd, 16, p, p + 7, value);
+    ssd1306_vline(ssd, 17, p + 1, p + 6, value);
+    ssd1306_vline(ssd, 18, p + 2, p + 5, value);
 }
 
-void draw_objects(ssd1306_t *ssd)
-{
-    // placar
-    static char pts[4];
-    /*
-    * fazer uma cópia é importante para manter a consistencia
-    * entre os frames, pois enquanto o core1 desenha o core0
-    * pode alterar o valor desses objetos
-    */ 
-    Pipe pps[5];
-    for (uint8_t i = 0; i < 5; i++){
-        pps[i].pos_x = pipes[i].pos_x;
-        pps[i].gap_y = pipes[i].gap_y;
-    }
-    int p = (int)(bird.pos_y);
-
+static inline void draw_pipes(ssd1306_t *ssd, Pipe pps[5], bool value) {
     // loop que desenha os canos
     for (uint8_t i = 0; i < 5; i++) {
         
@@ -350,27 +342,27 @@ void draw_objects(ssd1306_t *ssd)
         * cano nas bordas da tela
         * cano dentro da tela
         */ 
-        int16_t x0 = pps[i].pos_x;
+       int16_t x0 = pps[i].pos_x;
 
-        // se estiver fora da tela não tenta desenha
-        if (x0 >= 128 || x0 <= -5)
-            continue;
-
-        // parte de cima: (top1 = 0)
-        uint8_t h1 = pps[i].gap_y;
-
-        // parte de baixo:
-        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
-        uint8_t h2 = 64 - top2;
-
-        // ambas as partes possuem mesma largura
-        uint8_t w = PIPE_WIDTH;
-
-
-        // tratamento de redimensionamento no caso 
-        // dos canos estarem nas bordas do display
-        int8_t left;
-        if (x0 >= 124) {
+       // se estiver fora da tela não tenta desenha
+       if (x0 >= 128 || x0 <= -5)
+       continue;
+       
+       // parte de cima: (top1 = 0)
+       uint8_t h1 = pps[i].gap_y;
+       
+       // parte de baixo:
+       uint8_t top2 = pps[i].gap_y + GAP_SIZE;
+       uint8_t h2 = 64 - top2;
+       
+       // ambas as partes possuem mesma largura
+       uint8_t w = PIPE_WIDTH;
+       
+       
+       // tratamento de redimensionamento no caso 
+       // dos canos estarem nas bordas do display
+       int8_t left;
+       if (x0 >= 124) {
             w = 128 - x0;
             left = (int8_t)x0;
         } else if (x0 < 0){
@@ -380,60 +372,55 @@ void draw_objects(ssd1306_t *ssd)
             // o cano esta dentro da tela
             left = (int8_t)x0;
         }
-
-        ssd1306_rect(ssd, 0, left, w, h1, true, true);
-        ssd1306_rect(ssd, top2, left, w, h2, true, true);
-    }
-
-    snprintf(pts, sizeof(pts), "%03u", points);
-
-    ssd1306_draw_string(ssd, pts, 99, 3);
-    
-    // desenhar passaro
-    ssd1306_vline(ssd, 12, p + 2, p + 5, true);
-    ssd1306_vline(ssd, 13, p + 1, p + 6, true);
-    ssd1306_vline(ssd, 14, p, p + 7, true);
-    ssd1306_vline(ssd, 15, p, p + 7, true);
-    ssd1306_vline(ssd, 16, p, p + 7, true);
-    ssd1306_vline(ssd, 17, p + 1, p + 6, true);
-    ssd1306_vline(ssd, 18, p + 2, p + 5, true);
-    
-    // enviar os dados desenhados no buffer para o display
-    ssd1306_send_data(ssd);
-    
-    ssd1306_rect(ssd, 2, 98, 26, 10, false, true);
-    
-    // apagar tudo o que foi desenhando do buffer para o proximo frame
-    ssd1306_vline(ssd, 12, p + 2, p + 5, false);
-    ssd1306_vline(ssd, 13, p + 1, p + 6, false);
-    ssd1306_vline(ssd, 14, p, p + 7, false);
-    ssd1306_vline(ssd, 15, p, p + 7, false);
-    ssd1306_vline(ssd, 16, p, p + 7, false);
-    ssd1306_vline(ssd, 17, p + 1, p + 6, false);
-    ssd1306_vline(ssd, 18, p + 2, p + 5, false);
-
-    for (uint8_t i = 0; i < 5; i++) {
-        int16_t x0 = pps[i].pos_x;
-
-        if (x0 >= 128 || x0 <= -5)
-            continue;
         
-        uint8_t h1 = pps[i].gap_y;
-        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
-        uint8_t h2 = 64 - top2;
-        uint8_t w = PIPE_WIDTH;
-
-        int8_t left;
-        if (x0 >= 124) {
-            w = 128 - x0;
-            left = (int8_t)x0;
-        } else if (x0 < 0){
-            w += x0;
-            left = 0;
-        } else {
-            left = (int8_t)x0;
-        }
-        ssd1306_rect(ssd, 0, left, w, h1, false, true);
-        ssd1306_rect(ssd, top2, left, w, h2, false, true);
+        ssd1306_rect(ssd, 0, left, w, h1, value, true);
+        ssd1306_rect(ssd, top2, left, w, h2, value, true);
     }
 }
+
+// funcoes de inicio e fim de jogo
+static inline void game_start()
+{
+    for (uint8_t i = 0; i < 5; i++) {
+        pipes[i] = (Pipe){
+            (int16_t)(127 + i * PIPE_DISTANCE), // começam fora da tela 
+            (uint8_t)((rand() % (GAP_RANDOM)) + 3), // gap pseudo aleatorio
+            false
+        };
+    }
+    bird = (Bird){32.0f, 0.0f};
+    state = GAME_STATE_PLAYING;
+    points = 0;
+    play_game_start_sound();
+}
+
+static inline void game_over()
+{
+    state = GAME_STATE_GAME_OVER;
+    play_game_over_sound();
+}
+
+// funcoes de som
+static inline void play_init_sound()
+{
+    play_buzzer(900, 1200, 160);
+    play_buzzer(950, 1200, 120);
+    play_buzzer(1000, 1200, 80);
+}
+
+static inline void play_game_start_sound()
+{
+    play_buzzer(523, 659, 80);
+    play_buzzer(659, 784, 80);
+    play_buzzer(784, 1046, 150);
+    play_buzzer(865, 1046, 200);
+}
+
+static inline void play_game_over_sound()
+{
+    play_buzzer(800, 600, 140);
+    play_buzzer(700, 500, 110);
+    play_buzzer(600, 500, 110);
+    play_buzzer(500, 500, 180);
+}
+
