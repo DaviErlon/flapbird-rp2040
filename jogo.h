@@ -19,7 +19,8 @@
 
 #define GAP_SIZE 26
 #define PIPE_DISTANCE 37
-#define BIRD_SIZE 7
+#define BIRD_WIDTH 7
+#define PIPE_WIDTH 5
 
 typedef struct {
     int16_t pos_x;
@@ -32,11 +33,10 @@ typedef struct {
 } Bird;
 
 typedef enum {
-    START,
-    PLAYING,
-    GAME_OVER,
-    WAITING
-} Status;
+    GAME_STATE_MENU,
+    GAME_STATE_PLAYING,
+    GAME_STATE_GAME_OVER
+} State;
 
 void play_init_sound();
 void play_game_start_sound();
