@@ -7,8 +7,9 @@
 #include "inc/font.h"
 
 #include <inttypes.h>
-#include <time.h>
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 
 #include "jogo.h"
 
@@ -16,6 +17,7 @@
 volatile Pipe pipes[5] = {0};
 volatile Bird bird = {0};
 volatile State state = GAME_STATE_MENU;
+volatile uint8_t points = 0; 
 
 // programa do core0
 int main()
@@ -26,27 +28,40 @@ int main()
     
     // loop de processamento da fisica do flapbird  
     while(true) {
-        static bool last_btn = true;
+        static bool btn;
+        static bool last_btn_a = true;
+        static bool last_btn_b = true;
         switch(state) {
         // os estado menu e game over apenas aguardam o jogo começar
         case GAME_STATE_MENU:
         case GAME_STATE_GAME_OVER:
-            if (!gpio_get(BOTAO_A)){
+            btn = gpio_get(BOTAO_B);
+            if (!btn && last_btn_b){
                 game_start();
-                last_btn = gpio_get(BOTAO_A);    
+                last_btn_a = gpio_get(BOTAO_A);    
+                last_btn_b = gpio_get(BOTAO_B);    
             }
+            last_btn_b = btn;
             sleep_ms(10);
             break;
 
         // estado de playing processa a fisica
         case GAME_STATE_PLAYING:
-            bool btn = gpio_get(BOTAO_A);
+            btn = gpio_get(BOTAO_B);
+            if (!btn && last_btn_b){
+                state = GAME_STATE_PAUSE;
+                last_btn_b = btn;
+                break;
+            }
+            last_btn_b = btn;
+
+            btn = gpio_get(BOTAO_A);
             
             // detecta pulo
-            if (!btn && last_btn)
+            if (!btn && last_btn_a)
                 bird.vel_y = JUMP_VELOCITY;
             
-            last_btn = btn;
+            last_btn_a = btn;
 
             // atualiza passaro
             bird.vel_y += GRAVITY;
@@ -59,6 +74,7 @@ int main()
                 if (pipes[i].pos_x <= -5) {
                     pipes[i].pos_x = 175;
                     pipes[i].gap_y = (rand() % (58 - GAP_SIZE)) + 3;
+                    pipes[i].passed = false;
                     continue;
                 }
 
@@ -79,6 +95,11 @@ int main()
                     game_over();
                     break;
                 }
+
+                if (px < 12 && !pipes[i].passed) {
+                    pipes[i].passed = true;
+                    points++;
+                }
             }
             // colisao com o chao
             if (bird.pos_y >= HEIGHT - BIRD_WIDTH)
@@ -90,6 +111,17 @@ int main()
                 bird.vel_y = 0;
             }
             sleep_ms(50);
+            break;
+
+        case GAME_STATE_PAUSE:
+            btn = gpio_get(BOTAO_B);
+            if (!btn && last_btn_b){
+                state = GAME_STATE_PLAYING;
+                last_btn_a = gpio_get(BOTAO_A);    
+                last_btn_b = gpio_get(BOTAO_B);
+            }
+            last_btn_b = btn;
+            sleep_ms(10);
             break;
         }
     }
@@ -156,6 +188,23 @@ void render_task()
             ssd1306_fill(&ssd, false);
             ssd1306_send_data(&ssd);
             break;
+        
+        case GAME_STATE_PAUSE:
+            ssd1306_hline(&ssd, 22, 101, 19, true);
+            ssd1306_hline(&ssd, 22, 101, 41, true);
+            ssd1306_vline(&ssd, 22, 19, 41, true);
+            ssd1306_vline(&ssd, 101, 19, 41, true);
+            ssd1306_draw_string(&ssd, "PAUSED", 39, 23);
+            ssd1306_draw_string(&ssd, "press btn", 27, 31);
+            ssd1306_send_data(&ssd);
+
+            while (state == GAME_STATE_PAUSE)
+                sleep_ms(20);
+
+            // limpar tela
+            ssd1306_fill(&ssd, false);
+            ssd1306_send_data(&ssd);
+            break;
         }
     }
 }
@@ -175,6 +224,10 @@ void init_config()
     gpio_init(BOTAO_A);
     gpio_set_dir(BOTAO_A, GPIO_IN);
     gpio_pull_up(BOTAO_A);
+    
+    gpio_init(BOTAO_B);
+    gpio_set_dir(BOTAO_B, GPIO_IN);
+    gpio_pull_up(BOTAO_B);
 
     // PWM dos buzzers
     gpio_set_function(BUZZER_A, GPIO_FUNC_PWM);
@@ -256,11 +309,13 @@ void game_start()
     for (uint8_t i = 0; i < 5; i++) {
         pipes[i] = (Pipe){
             (int16_t)(127 + i * PIPE_DISTANCE), // começam fora da tela 
-            (uint8_t)((rand() % (58 - GAP_SIZE)) + 3) // gap pseudo aleatorio
+            (uint8_t)((rand() % (58 - GAP_SIZE)) + 3), // gap pseudo aleatorio
+            false
         };
     }
     bird = (Bird){32.0f, 0.0f};
     state = GAME_STATE_PLAYING;
+    points = 0;
     play_game_start_sound();
 }
 
@@ -272,6 +327,8 @@ void game_over()
 
 void draw_objects(ssd1306_t *ssd)
 {
+    // placar
+    static char pts[4];
     /*
     * fazer uma cópia é importante para manter a consistencia
     * entre os frames, pois enquanto o core1 desenha o core0
@@ -286,17 +343,7 @@ void draw_objects(ssd1306_t *ssd)
 
     // loop que desenha os canos
     for (uint8_t i = 0; i < 5; i++) {
-
-        // parte de cima: (top1 = 0)
-        uint8_t h1 = pps[i].gap_y;
-
-        // parte de baixo:
-        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
-        uint8_t h2 = 64 - top2;
-
-        // ambas as partes possuem mesma largura
-        uint8_t w = PIPE_WIDTH;
-
+        
         /*
         * com base em x0 iremos tratar os casos:
         * cano fora da tela
@@ -308,6 +355,17 @@ void draw_objects(ssd1306_t *ssd)
         // se estiver fora da tela não tenta desenha
         if (x0 >= 128 || x0 <= -5)
             continue;
+
+        // parte de cima: (top1 = 0)
+        uint8_t h1 = pps[i].gap_y;
+
+        // parte de baixo:
+        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
+        uint8_t h2 = 64 - top2;
+
+        // ambas as partes possuem mesma largura
+        uint8_t w = PIPE_WIDTH;
+
 
         // tratamento de redimensionamento no caso 
         // dos canos estarem nas bordas do display
@@ -327,6 +385,10 @@ void draw_objects(ssd1306_t *ssd)
         ssd1306_rect(ssd, top2, left, w, h2, true, true);
     }
 
+    snprintf(pts, sizeof(pts), "%03u", points);
+
+    ssd1306_draw_string(ssd, pts, 99, 3);
+    
     // desenhar passaro
     ssd1306_vline(ssd, 12, p + 2, p + 5, true);
     ssd1306_vline(ssd, 13, p + 1, p + 6, true);
@@ -335,11 +397,13 @@ void draw_objects(ssd1306_t *ssd)
     ssd1306_vline(ssd, 16, p, p + 7, true);
     ssd1306_vline(ssd, 17, p + 1, p + 6, true);
     ssd1306_vline(ssd, 18, p + 2, p + 5, true);
-
+    
     // enviar os dados desenhados no buffer para o display
     ssd1306_send_data(ssd);
-
-    // apagar tudo o que foi desenhando do buffer
+    
+    ssd1306_rect(ssd, 2, 98, 26, 10, false, true);
+    
+    // apagar tudo o que foi desenhando do buffer para o proximo frame
     ssd1306_vline(ssd, 12, p + 2, p + 5, false);
     ssd1306_vline(ssd, 13, p + 1, p + 6, false);
     ssd1306_vline(ssd, 14, p, p + 7, false);
@@ -349,14 +413,15 @@ void draw_objects(ssd1306_t *ssd)
     ssd1306_vline(ssd, 18, p + 2, p + 5, false);
 
     for (uint8_t i = 0; i < 5; i++) {
-        uint8_t h1 = pps[i].gap_y;
-        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
-        uint8_t h2 = 64 - top2;
-        uint8_t w = PIPE_WIDTH;
         int16_t x0 = pps[i].pos_x;
 
         if (x0 >= 128 || x0 <= -5)
             continue;
+        
+        uint8_t h1 = pps[i].gap_y;
+        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
+        uint8_t h2 = 64 - top2;
+        uint8_t w = PIPE_WIDTH;
 
         int8_t left;
         if (x0 >= 124) {

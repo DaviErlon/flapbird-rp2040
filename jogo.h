@@ -6,6 +6,7 @@
 #include "inc/ssd1306.h"
 
 #define BOTAO_A 5
+#define BOTAO_B 6
 #define I2C_PORT i2c1
 #define I2C_SDA 14
 #define I2C_SCL 15
@@ -25,6 +26,7 @@
 typedef struct {
     int16_t pos_x;
     uint8_t gap_y;
+    bool passed;
 } Pipe;
 
 typedef struct {
@@ -35,7 +37,8 @@ typedef struct {
 typedef enum {
     GAME_STATE_MENU,
     GAME_STATE_PLAYING,
-    GAME_STATE_GAME_OVER
+    GAME_STATE_GAME_OVER,
+    GAME_STATE_PAUSE    
 } State;
 
 void play_init_sound();
