@@ -16,7 +16,8 @@
 volatile Pipe pipes[5] = {0};
 volatile Bird bird = {0};
 volatile State state = GAME_STATE_MENU;
-volatile uint8_t points = 0; 
+volatile uint8_t points = 0;
+volatile char pts[4];
 
 // programa do core0
 int main()
@@ -223,8 +224,7 @@ static inline void init_config()
 static inline void draw_objects(ssd1306_t *ssd)
 {
     // placar
-    char pts[4];
-    snprintf(pts, sizeof(pts), "%03u", points);
+    snprintf((char *)pts, sizeof(pts), "%03u", points);
     
     /*
     * fazer uma cópia é importante para manter a consistencia
@@ -240,7 +240,7 @@ static inline void draw_objects(ssd1306_t *ssd)
     
     //desenhar canos, placar e o passaro
     draw_pipes(ssd, pps, true);
-    ssd1306_draw_string(ssd, pts, 99, 3);
+    ssd1306_draw_string(ssd, (const char*)pts, 99, 3);
     draw_bird(ssd, p, true);
     
     // enviar os dados desenhados no buffer para o display
@@ -303,17 +303,23 @@ static inline void paused_screen(ssd1306_t *ssd){
     ssd1306_vline(ssd, 22, 19, 41, true);
     ssd1306_vline(ssd, 101, 19, 41, true);
     ssd1306_draw_string(ssd, "PAUSED", 39, 23);
-    ssd1306_draw_string(ssd, "press btn", 27, 31);
+    ssd1306_draw_string(ssd, "pres btn", 27, 31);
     ssd1306_send_data(ssd);
 }
 
-static inline void game_over_screen(ssd1306_t *ssd){
+static inline void game_over_screen(ssd1306_t *ssd) {
+    char str[11];
+    
+    snprintf(str, sizeof(str), "score %s", (const char*)pts);
+    
     ssd1306_hline(ssd, 22, 101, 19, true);
-    ssd1306_hline(ssd, 22, 101, 41, true);
-    ssd1306_vline(ssd, 22, 19, 41, true);
-    ssd1306_vline(ssd, 101, 19, 41, true);
+    ssd1306_hline(ssd, 22, 101, 50, true);
+    ssd1306_vline(ssd, 22, 19, 50, true);
+    ssd1306_vline(ssd, 101, 19, 50, true);
+    
     ssd1306_draw_string(ssd, "YOU LOST", 31, 23);
     ssd1306_draw_string(ssd, "try again", 27, 31);
+    ssd1306_draw_string(ssd, (const char*)str, 27, 40);
     ssd1306_send_data(ssd);
 }
 
