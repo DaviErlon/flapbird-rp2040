@@ -10,7 +10,61 @@
 #include <string.h>
 #include <stdio.h>
 
-#include "jogo.h"
+// definições das constantes
+#define BOTAO_A 5
+#define BOTAO_B 6
+#define I2C_PORT i2c1
+#define I2C_SDA 14
+#define I2C_SCL 15
+#define END 0x3C
+#define BUZZER_A 10
+#define BUZZER_B 21
+
+#define GRAVITY 0.3f
+#define JUMP_VELOCITY -2.2f
+#define PIPE_VELOCITY -1
+
+#define GAP_SIZE 26
+// x % GAP_RANDOM = [0,31];             intervalo de geracao
+// [0,31] + 3 = [3, 34];                centralização do intervalo de geracao
+// [3,34] + [0, GAP_SiZE] = [3,60]      gap visivel tem ao menos 3px dos extremos, display_y = [0, 63] px
+#define GAP_RANDOM 58 - GAP_SIZE
+#define PIPE_DISTANCE 37
+#define BIRD_WIDTH 7
+#define PIPE_WIDTH 5
+
+typedef struct {
+    int16_t pos_x;
+    uint8_t gap_y;
+    bool passed;
+} Pipe;
+
+typedef struct {
+    float pos_y;
+    float vel_y;
+} Bird;
+
+typedef enum {
+    GAME_STATE_MENU,
+    GAME_STATE_PLAYING,
+    GAME_STATE_GAME_OVER,
+    GAME_STATE_PAUSE    
+} State;
+
+static inline void play_init_sound();
+static inline void play_game_start_sound();
+static inline void play_game_over_sound();
+static inline void init_config();
+static void render_task();
+static inline void game_start();
+static inline void game_over();
+static inline void draw_objects(ssd1306_t *ssd);
+static inline void draw_pipes(ssd1306_t *ssd, Pipe pps[5], bool value);
+static inline void draw_bird(ssd1306_t *ssd, int8_t p, bool value);
+static inline void game_over_screen(ssd1306_t *ssd);
+static inline void paused_screen(ssd1306_t *ssd);
+static inline void menu_screen(ssd1306_t *ssd);
+static inline void clear_screen(ssd1306_t *ssd);
 
 // objetos compartilhados entre os núcleos do rp2040
 volatile Pipe pipes[5] = {0};
@@ -95,8 +149,8 @@ int main()
                     game_over();
                     break;
                 }
-
-                if (px < 12 && !pipes[i].passed) {
+                // acresimo no placar
+                if (px < 10 && !pipes[i].passed) {
                     pipes[i].passed = true;
                     points++;
                 }
@@ -112,7 +166,7 @@ int main()
             }
             sleep_ms(50);
             break;
-
+        // aguarda mas não reinicializa as variaveis
         case GAME_STATE_PAUSE:
             btn = gpio_get(BOTAO_B);
             if (!btn && last_btn_b){
@@ -128,9 +182,8 @@ int main()
     return 0;
 }
 
-
 // programa do core1
-void render_task()
+static void render_task()
 {
     // inicialização do display em paralelo com as inicializações do core0
     i2c_init(I2C_PORT, 400 * 1000);
@@ -252,40 +305,6 @@ static inline void draw_objects(ssd1306_t *ssd)
     draw_pipes(ssd, pps, false);
 }
 
-// função generica para emitir uma frequencia aos buzzers
-void play_buzzer(uint freq_a, uint freq_b, uint tempo_ms)
-{
-    if (freq_a == 0 || freq_b == 0){
-        sleep_ms(tempo_ms);
-        return;
-    }
-
-    uint slice_a = pwm_gpio_to_slice_num(BUZZER_A);
-    uint slice_b = pwm_gpio_to_slice_num(BUZZER_B);
-    
-    uint ch_a = pwm_gpio_to_channel(BUZZER_A);
-    uint ch_b = pwm_gpio_to_channel(BUZZER_B);
-    
-    // frequencia pwm
-    uint32_t wrap_a = 125000000 / (4 * freq_a) - 1;
-    uint32_t wrap_b = 125000000 / (4 * freq_b) - 1;
-
-    // level / wrap = duty cycle
-    pwm_set_wrap(slice_a, wrap_a);
-    pwm_set_wrap(slice_b, wrap_b);
-    
-    pwm_set_chan_level(slice_a, ch_a, wrap_a / 2); // 50% duty cycle
-    pwm_set_chan_level(slice_b, ch_b, wrap_b / 2);
-
-    sleep_ms(tempo_ms);
-
-    // desativar som
-    pwm_set_chan_level(slice_a, ch_a, 0);
-    pwm_set_chan_level(slice_b, ch_b, 0);
-
-    sleep_ms(30);
-}
-
 //funcoes de auxilio para desenho
 static inline void menu_screen(ssd1306_t *ssd){
     ssd1306_hline(ssd, 22, 101, 19, true);
@@ -343,40 +362,40 @@ static inline void draw_pipes(ssd1306_t *ssd, Pipe pps[5], bool value) {
     for (uint8_t i = 0; i < 5; i++) {
         
         /*
-        * com base em x0 iremos tratar os casos:
+        * com base em px iremos tratar os casos:
         * cano fora da tela
         * cano nas bordas da tela
         * cano dentro da tela
         */ 
-       int16_t x0 = pps[i].pos_x;
-
-       // se estiver fora da tela não tenta desenha
-       if (x0 >= 128 || x0 <= -5)
-       continue;
+        int16_t px = pps[i].pos_x;
+        
+        // se estiver fora da tela não tenta desenha
+        if (px >= 128 || px <= -5)
+        continue;
+    
+        // parte de cima: (top1 = 0)
+        uint8_t h1 = pps[i].gap_y;
        
-       // parte de cima: (top1 = 0)
-       uint8_t h1 = pps[i].gap_y;
-       
-       // parte de baixo:
-       uint8_t top2 = pps[i].gap_y + GAP_SIZE;
-       uint8_t h2 = 64 - top2;
-       
-       // ambas as partes possuem mesma largura
-       uint8_t w = PIPE_WIDTH;
-       
-       
-       // tratamento de redimensionamento no caso 
-       // dos canos estarem nas bordas do display
-       int8_t left;
-       if (x0 >= 124) {
-            w = 128 - x0;
-            left = (int8_t)x0;
-        } else if (x0 < 0){
-            w += x0;
+        // parte de baixo:
+        uint8_t top2 = pps[i].gap_y + GAP_SIZE;
+        uint8_t h2 = 64 - top2;
+        
+        // ambas as partes possuem mesma largura
+        uint8_t w = PIPE_WIDTH;
+        
+        
+        // tratamento de redimensionamento no caso 
+        // dos canos estarem nas bordas do display
+        int8_t left;
+        if (px >= 124) {
+            w = 128 - px;
+            left = (int8_t)px;
+        } else if (px < 0){
+            w += px;
             left = 0;
         } else {
             // o cano esta dentro da tela
-            left = (int8_t)x0;
+            left = (int8_t)px;
         }
         
         ssd1306_rect(ssd, 0, left, w, h1, value, true);
@@ -406,6 +425,47 @@ static inline void game_over()
     play_game_over_sound();
 }
 
+// função generica para emitir uma frequencia aos buzzers
+static void play_buzzer(uint freq_a, uint freq_b, uint tempo_ms)
+{
+    static uint slice_a = UINT32_MAX;
+    static uint slice_b = 0;
+    static uint ch_a = 0;
+    static uint ch_b = 0;
+
+    if (freq_a == 0 || freq_b == 0){
+        return;
+    }
+
+    if (slice_a == UINT32_MAX) {
+        slice_a = pwm_gpio_to_slice_num(BUZZER_A);
+        slice_b = pwm_gpio_to_slice_num(BUZZER_B);
+        
+        ch_a = pwm_gpio_to_channel(BUZZER_A);
+        ch_b = pwm_gpio_to_channel(BUZZER_B);
+    }
+    
+    // frequencia pwm
+    uint32_t wrap_a = 125000000 / (4 * freq_a) - 1;
+    uint32_t wrap_b = 125000000 / (4 * freq_b) - 1;
+
+    // level / wrap = duty cycle
+    pwm_set_wrap(slice_a, wrap_a);
+    pwm_set_wrap(slice_b, wrap_b);
+    
+    pwm_set_chan_level(slice_a, ch_a, wrap_a / 2); // 50% duty cycle
+    pwm_set_chan_level(slice_b, ch_b, wrap_b / 2);
+
+    // problema de atenção!
+    sleep_ms(tempo_ms);
+
+    // desativar som
+    pwm_set_chan_level(slice_a, ch_a, 0);
+    pwm_set_chan_level(slice_b, ch_b, 0);
+
+    sleep_ms(20);
+}
+
 // funcoes de som
 static inline void play_init_sound()
 {
@@ -429,4 +489,3 @@ static inline void play_game_over_sound()
     play_buzzer(600, 500, 110);
     play_buzzer(500, 500, 180);
 }
-
